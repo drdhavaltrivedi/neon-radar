@@ -1,0 +1,5 @@
+{
+  "name": "Neon Radar",
+  "description": "A futuristic, ephemeral proximity-based chat application with a radar-style discovery interface.",
+  "requestFramePermissions": ["geolocation"]
+}
