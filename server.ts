@@ -81,28 +81,27 @@ let rooms: Room[] = loadData(ROOMS_FILE, []);
 const messagesByRoom: Record<string, Message[]> = loadData(MESSAGES_FILE, {});
 const users: Record<string, UserStatus & { lat: number; lng: number }> = {};
 
+import cors from 'cors';
+
 async function startServer() {
   const app = express();
   
-  // Robust CORS for production proxy scenarios
-  app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(200);
-    }
-    next();
-  });
+  // Robust CORS for all domains in production
+  app.use(cors({
+    origin: true,
+    credentials: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+  }));
 
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: true,
       methods: ["GET", "POST"],
       credentials: true
     },
-    transports: ['websocket', 'polling'], // Explicitly show transports
+    transports: ['websocket', 'polling'],
     allowEIO3: true,
     pingTimeout: 60000,
     pingInterval: 25000
