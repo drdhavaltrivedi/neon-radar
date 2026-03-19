@@ -19,7 +19,8 @@ export default function App() {
   const [userAlias, setUserAlias] = useState('USER_' + Math.random().toString(36).substring(2, 6).toUpperCase());
 
   useEffect(() => {
-    socketRef.current = io();
+    const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
+    socketRef.current = io(SOCKET_URL);
     const socket = socketRef.current;
 
     socket.on('rooms:update', (updatedRooms: Room[]) => {
