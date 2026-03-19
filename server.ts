@@ -107,6 +107,16 @@ async function startServer() {
     pingInterval: 25000
   });
 
+  // Health check endpoint for Railway proxy validation
+  app.get('/api/health', (req, res) => {
+    res.json({ 
+      status: 'matrix_active',
+      node_env: process.env.NODE_ENV,
+      port: process.env.PORT,
+      uptime: process.uptime()
+    });
+  });
+
   const PORT = Number(process.env.PORT) || 3000;
 
   // TTL Countdown logic
