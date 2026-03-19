@@ -14,6 +14,8 @@ interface ChatViewProps {
   onReactToMessage: (messageId: string, emoji: string) => void;
   userAlias: string;
   onScramble: () => void;
+  onRoomSelect: (room: Room) => void;
+  onDeployClick: () => void;
 }
 
 const COMMON_EMOJIS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '💯', '⚡'];
@@ -168,7 +170,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onSetStatus,
   onReactToMessage,
   userAlias,
-  onScramble
+  onScramble,
+  onRoomSelect,
+  onDeployClick
 }) => {
   const [inputText, setInputText] = useState('');
   const [activeReactionPicker, setActiveReactionPicker] = useState<string | null>(null);
@@ -380,6 +384,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             {rooms.map((r) => (
               <div 
                 key={r.id}
+                onClick={() => onRoomSelect(r)}
                 className={`p-3 rounded cursor-pointer transition-all group border ${
                   r.id === room.id 
                     ? 'border-primary bg-primary/10 shadow-neon-primary' 
@@ -401,7 +406,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
             ))}
           </div>
           <div className="p-4 border-t border-muted/50">
-            <button className="w-full h-10 bg-surface border border-primary text-primary hover:bg-primary hover:text-background-dark transition-colors font-bold text-sm tracking-wider uppercase rounded flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(19,236,106,0.2)] hover:shadow-neon-primary">
+            <button 
+              onClick={onDeployClick}
+              className="w-full h-10 bg-surface border border-primary text-primary hover:bg-primary hover:text-background-dark transition-colors font-bold text-sm tracking-wider uppercase rounded flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(19,236,106,0.2)] hover:shadow-neon-primary"
+            >
               <Plus size={18} />
               Deploy Frequency
             </button>

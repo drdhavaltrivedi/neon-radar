@@ -143,6 +143,8 @@ export default function App() {
             onReactToMessage={handleReactToMessage}
             userAlias={userAlias}
             onScramble={handleScrambleAlias}
+            onRoomSelect={handleRoomSelect}
+            onDeployClick={() => setIsDeployModalOpen(true)}
           />
         )
       )}
