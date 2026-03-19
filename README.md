@@ -2,8 +2,11 @@
 
 A futuristic, real-time proximity-based chat application set in a neon-drenched secure zone. **Neon Radar** allows you to discover local "frequency" rooms, connect with other nearby nodes, and engage in ephemeral, secure transmissions.
 
-![Neon Radar Interface](https://via.placeholder.com/1200x600?text=Neon+Radar+Interface+Preview)
+![Neon Radar Interface](/public/og-image.png)
 
+### 🌍 Live Deployment
+- **Frontend (Vercel)**: [https://neon-radar.vercel.app/](https://neon-radar.vercel.app/)
+- **Backend (Railway)**: [https://neon-radar-production.up.railway.app/](https://neon-radar-production.up.railway.app/)
 ## 📡 Live Radar Tracking
 
 The core of the experience is the **Proximity Radar**, which scans a 100m secure zone around your location.
