@@ -1,0 +1,23 @@
+# Neon Radar 🛰️
+
+Discover and connect with local nodes in a secure, neon-drenched ephemeral chat matrix.
+
+## Core Features
+1. **Nearby Scanning**: Uses a 100m proximity radar to discover active frequencies (rooms).
+2. **Ephemeral Identity**: Users can scramble or manually set their public alias at any time.
+3. **Real-time Sync**: Message exchange occurs through a high-speed WebSocket protocol.
+4. **Frequency Deployment**: Anyone can deploy their own frequency node which expires over time (TTL).
+
+## Use Cases
+- Localized events and meetups.
+- Anonymous and secure in-person transmission of information.
+- Rapid temporary room creation without sign-ups.
+
+## Technical Details
+- **Architecture**: Vite + React Frontend, Node.js + Express Backend.
+- **Protocol**: Socket.io for bi-directional real-time data flow.
+- **Persistence**: Temporary local JSON storage for logs (Production may use SQL).
+- **Security**: Proximity-local, ephemeral identities.
+
+## Primary URL
+https://neon-radar.railway.app/
