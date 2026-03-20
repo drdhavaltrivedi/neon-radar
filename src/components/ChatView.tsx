@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, TowerControl, Radio, Timer, Users, Send, Shuffle, AlertTriangle, Plus, Smile, Reply, X, Settings, Volume2, VolumeX, Bell, BellOff, Smartphone } from 'lucide-react';
+import { ArrowLeft, TowerControl, Radio, Timer, Send, Shuffle, AlertTriangle, Plus, Smile, Reply, X, Settings, Volume2, VolumeX, Bell, BellOff, Smartphone, WifiOff } from 'lucide-react';
 import { Room, Message, NotificationSettings, User } from '../types';
 
 interface ChatViewProps {
@@ -16,9 +16,20 @@ interface ChatViewProps {
   onScramble: () => void;
   onRoomSelect: (room: Room) => void;
   onDeployClick: () => void;
+  connectionStatus: 'connecting' | 'connected' | 'disconnected';
 }
 
 const COMMON_EMOJIS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '💯', '⚡'];
+const MAX_MESSAGE_LENGTH = 500;
+const INITIAL_TTL = 3600;
+
+function getStoredSettings(): NotificationSettings {
+  try {
+    const stored = localStorage.getItem('neon-radar:settings');
+    if (stored) return JSON.parse(stored);
+  } catch {}
+  return { soundEnabled: true, vibrationEnabled: true, mutedChannels: [] };
+}
 
 interface MessageItemProps {
   msg: Message;
@@ -73,26 +84,26 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 </span>
               </div>
               <span className={`text-text-main break-words ${depth > 0 ? 'text-xs opacity-90' : 'text-sm'}`}>{msg.text}</span>
-              
+
               <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 relative">
-                <button 
+                <button
                   onClick={() => setReplyingTo(msg)}
                   className="p-1 text-muted hover:text-accent transition-colors rounded hover:bg-accent/10"
                   title="Reply"
                 >
                   <Reply size={depth > 0 ? 14 : 16} />
                 </button>
-                <button 
+                <button
                   onClick={() => toggleReactionPicker(msg.id)}
                   className="p-1 text-muted hover:text-primary transition-colors rounded hover:bg-primary/10"
                   title="React"
                 >
                   <Smile size={depth > 0 ? 14 : 16} />
                 </button>
-                
+
                 <AnimatePresence>
                   {activeReactionPicker === msg.id && (
-                    <motion.div 
+                    <motion.div
                       initial={{ opacity: 0, scale: 0.9, y: 10 }}
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.9, y: 10 }}
@@ -120,8 +131,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
                     key={reaction.emoji}
                     onClick={() => onReactToMessage(msg.id, reaction.emoji)}
                     className={`px-2 py-0.5 rounded-full font-mono flex items-center gap-1.5 transition-all border ${
-                      reaction.userIds.includes('self') 
-                        ? 'bg-primary/20 border-primary text-primary shadow-[0_0_8px_rgba(19,236,106,0.3)]' 
+                      reaction.userIds.includes('self')
+                        ? 'bg-primary/20 border-primary text-primary shadow-[0_0_8px_rgba(19,236,106,0.3)]'
                         : 'bg-surface border-muted text-muted hover:border-accent/50'
                     } ${depth > 0 ? 'text-[10px]' : 'text-xs'}`}
                   >
@@ -139,7 +150,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       {replies.length > 0 && (
         <div className="flex flex-col">
           {replies.map(reply => (
-            <MessageItem 
+            <MessageItem
               key={reply.id}
               msg={reply}
               messages={messages}
@@ -172,46 +183,83 @@ export const ChatView: React.FC<ChatViewProps> = ({
   userAlias,
   onScramble,
   onRoomSelect,
-  onDeployClick
+  onDeployClick,
+  connectionStatus
 }) => {
   const [inputText, setInputText] = useState('');
   const [activeReactionPicker, setActiveReactionPicker] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
-    soundEnabled: true,
-    vibrationEnabled: true,
-    mutedChannels: []
-  });
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(getStoredSettings);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Close reaction picker on outside click
+  useEffect(() => {
+    if (!activeReactionPicker) return;
+    const handleClick = () => setActiveReactionPicker(null);
+    const timer = setTimeout(() => document.addEventListener('click', handleClick), 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handleClick);
+    };
+  }, [activeReactionPicker]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (activeReactionPicker) {
+          setActiveReactionPicker(null);
+        } else if (replyingTo) {
+          setReplyingTo(null);
+        } else if (isSettingsOpen) {
+          setIsSettingsOpen(false);
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [activeReactionPicker, replyingTo, isSettingsOpen]);
+
+  // Persist notification settings
+  useEffect(() => {
+    try {
+      localStorage.setItem('neon-radar:settings', JSON.stringify(notificationSettings));
+    } catch {}
+  }, [notificationSettings]);
+
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (inputText.trim()) {
-      onSendMessage(inputText, replyingTo?.id);
+    const trimmed = inputText.trim();
+    if (trimmed && trimmed.length <= MAX_MESSAGE_LENGTH) {
+      onSendMessage(trimmed, replyingTo?.id);
       setInputText('');
       setReplyingTo(null);
+      inputRef.current?.focus();
     }
   };
 
-  const toggleReactionPicker = (messageId: string) => {
-    setActiveReactionPicker(activeReactionPicker === messageId ? null : messageId);
-  };
+  const toggleReactionPicker = useCallback((messageId: string) => {
+    setActiveReactionPicker(prev => prev === messageId ? null : messageId);
+  }, []);
 
-  const handleReactionSelect = (messageId: string, emoji: string) => {
+  const handleReactionSelect = useCallback((messageId: string, emoji: string) => {
     onReactToMessage(messageId, emoji);
     setActiveReactionPicker(null);
-  };
+  }, [onReactToMessage]);
 
   const formatTtl = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+
+  const ttlPercent = Math.max(0, Math.min(100, (room.ttl / INITIAL_TTL) * 100));
 
   const toggleMuteChannel = (roomId: string) => {
     setNotificationSettings(prev => ({
@@ -222,17 +270,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }));
   };
 
+  const charsRemaining = MAX_MESSAGE_LENGTH - inputText.length;
+  const isNearLimit = charsRemaining <= 50;
+
   return (
     <div className="h-screen w-full overflow-hidden flex flex-col font-sans antialiased bg-background-dark relative">
       <AnimatePresence>
         {isSettingsOpen && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-background-dark/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setIsSettingsOpen(false); }}
           >
-            <motion.div 
+            <motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
@@ -263,7 +315,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         }`}
                       >
                         <div className={`w-2 h-2 rounded-full ${
-                          status === 'online' ? 'bg-primary' : 
+                          status === 'online' ? 'bg-primary' :
                           status === 'away' ? 'bg-yellow-500' : 'bg-danger'
                         } ${members.find(m => m.alias === userAlias)?.status === status && status === 'online' ? 'animate-pulse' : ''}`} />
                         {status}
@@ -280,7 +332,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         {notificationSettings.soundEnabled ? <Volume2 className="text-primary" size={20} /> : <VolumeX className="text-danger" size={20} />}
                         <span className="text-text-main font-mono text-sm">Audio Feedback</span>
                       </div>
-                      <button 
+                      <button
                         onClick={() => setNotificationSettings(prev => ({ ...prev, soundEnabled: !prev.soundEnabled }))}
                         className={`w-12 h-6 rounded-full relative transition-colors ${notificationSettings.soundEnabled ? 'bg-primary' : 'bg-muted'}`}
                       >
@@ -293,7 +345,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         <Smartphone className={notificationSettings.vibrationEnabled ? "text-primary" : "text-muted"} size={20} />
                         <span className="text-text-main font-mono text-sm">Haptic Pulse</span>
                       </div>
-                      <button 
+                      <button
                         onClick={() => setNotificationSettings(prev => ({ ...prev, vibrationEnabled: !prev.vibrationEnabled }))}
                         className={`w-12 h-6 rounded-full relative transition-colors ${notificationSettings.vibrationEnabled ? 'bg-primary' : 'bg-muted'}`}
                       >
@@ -312,7 +364,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                           <Radio size={16} className={r.id === room.id ? "text-primary" : "text-muted"} />
                           <span className={`font-mono text-xs ${r.id === room.id ? "text-white font-bold" : "text-text-main"}`}>{r.topic}</span>
                         </div>
-                        <button 
+                        <button
                           onClick={() => toggleMuteChannel(r.id)}
                           className={`p-1.5 rounded transition-colors ${notificationSettings.mutedChannels.includes(r.id) ? 'bg-danger/20 text-danger' : 'bg-primary/10 text-primary'}`}
                         >
@@ -325,7 +377,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
               </div>
 
               <div className="p-6 bg-background-dark/50 border-t border-muted/50">
-                <button 
+                <button
                   onClick={() => setIsSettingsOpen(false)}
                   className="w-full py-3 bg-primary text-background-dark font-bold uppercase tracking-widest rounded shadow-neon-primary hover:bg-primary/90 transition-colors"
                 >
@@ -339,7 +391,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
       <header className="h-14 shrink-0 flex items-center justify-between px-4 border-b border-muted bg-surface/80 backdrop-blur-sm z-10 relative">
         <div className="flex items-center gap-4">
-          <button 
+          <button
             onClick={onBack}
             className="text-primary hover:text-white transition-colors flex items-center justify-center p-2 rounded hover:bg-primary/20 cursor-pointer"
           >
@@ -347,14 +399,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
           </button>
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-neon-primary"></span>
+              <span className={`w-2 h-2 rounded-full ${connectionStatus === 'connected' ? 'bg-primary animate-pulse shadow-neon-primary' : 'bg-danger'}`}></span>
               <h1 className="text-white text-lg font-bold tracking-widest uppercase">{room.topic}</h1>
             </div>
             <span className="text-muted text-xs font-mono uppercase">Freq: {room.frequency} // Range: 100m</span>
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <button 
+          <button
             onClick={() => setIsSettingsOpen(true)}
             className="text-muted hover:text-primary transition-colors flex items-center justify-center p-2 rounded hover:bg-primary/10 cursor-pointer"
             title="Notification Settings"
@@ -362,12 +414,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
             <Settings size={20} />
           </button>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 text-primary font-mono text-sm border border-primary/30 px-3 py-1 bg-primary/5 rounded shadow-neon-primary">
-              <TowerControl size={18} />
-              <span>CONNECTED</span>
-            </div>
+            {connectionStatus === 'connected' ? (
+              <div className="flex items-center gap-2 text-primary font-mono text-sm border border-primary/30 px-3 py-1 bg-primary/5 rounded shadow-neon-primary">
+                <TowerControl size={18} />
+                <span>CONNECTED</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-danger font-mono text-sm border border-danger/30 px-3 py-1 bg-danger/5 rounded shadow-neon-danger animate-pulse">
+                <WifiOff size={18} />
+                <span>OFFLINE</span>
+              </div>
+            )}
             <div className={`w-3 h-3 rounded-full ${
-              members.find(m => m.alias === userAlias)?.status === 'online' ? 'bg-primary animate-pulse shadow-neon-primary' : 
+              members.find(m => m.alias === userAlias)?.status === 'online' ? 'bg-primary animate-pulse shadow-neon-primary' :
               members.find(m => m.alias === userAlias)?.status === 'away' ? 'bg-yellow-500' : 'bg-danger'
             }`} title={`Status: ${members.find(m => m.alias === userAlias)?.status || 'online'}`} />
           </div>
@@ -375,19 +434,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
       </header>
 
       <div className="flex flex-1 overflow-hidden relative z-0">
-        <aside className="w-[300px] shrink-0 border-r border-muted bg-surface flex flex-col hidden md:flex">
+        <aside className="w-[300px] shrink-0 border-r border-muted bg-surface flex-col hidden md:flex">
           <div className="p-4 border-b border-muted/50">
             <h2 className="text-muted text-xs font-bold uppercase tracking-widest mb-1">Active Frequencies</h2>
             <div className="text-[10px] font-mono text-primary animate-pulse uppercase">Scanning 100m radius...</div>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {rooms.map((r) => (
-              <div 
+              <div
                 key={r.id}
                 onClick={() => onRoomSelect(r)}
                 className={`p-3 rounded cursor-pointer transition-all group border ${
-                  r.id === room.id 
-                    ? 'border-primary bg-primary/10 shadow-neon-primary' 
+                  r.id === room.id
+                    ? 'border-primary bg-primary/10 shadow-neon-primary'
                     : 'border-muted hover:border-accent/50 hover:bg-surface/80'
                 }`}
               >
@@ -406,7 +465,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             ))}
           </div>
           <div className="p-4 border-t border-muted/50">
-            <button 
+            <button
               onClick={onDeployClick}
               className="w-full h-10 bg-surface border border-primary text-primary hover:bg-primary hover:text-background-dark transition-colors font-bold text-sm tracking-wider uppercase rounded flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(19,236,106,0.2)] hover:shadow-neon-primary"
             >
@@ -425,7 +484,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             </div>
 
             {messages.filter(m => !m.parentId).map((msg) => (
-              <MessageItem 
+              <MessageItem
                 key={msg.id}
                 msg={msg}
                 messages={messages}
@@ -445,7 +504,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
           <div className="absolute bottom-0 left-0 right-0 bg-background-dark/95 backdrop-blur border-t border-muted p-4 z-20">
             <AnimatePresence>
               {replyingTo && (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
@@ -455,7 +514,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     <span className="text-[10px] text-accent uppercase font-bold tracking-widest">Replying to &lt;{replyingTo.senderAlias}&gt;</span>
                     <span className="text-xs text-text-main truncate max-w-md">{replyingTo.text}</span>
                   </div>
-                  <button 
+                  <button
                     onClick={() => setReplyingTo(null)}
                     className="text-muted hover:text-white p-1"
                   >
@@ -470,18 +529,30 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   <span className="font-mono font-bold">&gt;</span>
                 </div>
                 <input
+                  ref={inputRef}
                   value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  className="w-full bg-surface border border-muted text-white font-mono text-sm rounded focus:ring-1 focus:ring-primary focus:border-primary block pl-8 p-3 transition-colors placeholder:text-muted/70"
-                  placeholder="TRANSMIT MESSAGE..."
+                  onChange={(e) => {
+                    if (e.target.value.length <= MAX_MESSAGE_LENGTH) {
+                      setInputText(e.target.value);
+                    }
+                  }}
+                  disabled={connectionStatus === 'disconnected'}
+                  className="w-full bg-surface border border-muted text-white font-mono text-sm rounded focus:ring-1 focus:ring-primary focus:border-primary block pl-8 p-3 transition-colors placeholder:text-muted/70 disabled:opacity-50 disabled:cursor-not-allowed"
+                  placeholder={connectionStatus === 'disconnected' ? 'RECONNECTING...' : 'TRANSMIT MESSAGE...'}
                 />
-                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none gap-2">
+                  {isNearLimit && (
+                    <span className={`text-[10px] font-mono ${charsRemaining <= 10 ? 'text-danger' : 'text-muted'}`}>
+                      {charsRemaining}
+                    </span>
+                  )}
                   <span className="text-[10px] text-muted font-mono uppercase border border-muted/50 px-1 rounded">Enter</span>
                 </div>
               </div>
-              <button 
+              <button
                 type="submit"
-                className="bg-primary hover:bg-primary/80 text-background-dark font-bold px-6 rounded transition-colors flex items-center justify-center shadow-neon-primary"
+                disabled={!inputText.trim() || connectionStatus === 'disconnected'}
+                className="bg-primary hover:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed text-background-dark font-bold px-6 rounded transition-colors flex items-center justify-center shadow-neon-primary"
               >
                 <Send size={20} />
               </button>
@@ -489,15 +560,27 @@ export const ChatView: React.FC<ChatViewProps> = ({
           </div>
         </main>
 
-        <aside className="w-[240px] shrink-0 border-l border-muted bg-surface flex flex-col hidden lg:flex">
+        <aside className="w-[240px] shrink-0 border-l border-muted bg-surface flex-col hidden lg:flex">
           <div className="p-6 border-b border-muted/50 flex flex-col items-center justify-center bg-surface relative overflow-hidden">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,0,85,0.05)_0%,transparent_70%)]"></div>
             <h3 className="text-muted text-[10px] uppercase tracking-[0.2em] mb-2 font-bold z-10">Time to Live</h3>
-            <div className="text-4xl font-mono font-bold text-danger shadow-neon-danger inline-block tracking-tighter z-10">
+            <div className={`text-4xl font-mono font-bold inline-block tracking-tighter z-10 ${
+              room.ttl < 300 ? 'text-danger shadow-neon-danger animate-pulse' : 'text-danger shadow-neon-danger'
+            }`}>
               {formatTtl(room.ttl)}
             </div>
             <div className="w-full bg-surface border border-danger/30 h-2 mt-4 rounded-full overflow-hidden z-10">
-              <div className="bg-danger h-full w-[8%]" style={{ boxShadow: '0 0 8px #FF0055' }}></div>
+              <div
+                className="bg-danger h-full transition-all duration-1000 ease-linear"
+                style={{
+                  width: `${ttlPercent}%`,
+                  boxShadow: '0 0 8px #FF0055'
+                }}
+              ></div>
+            </div>
+            <div className="flex justify-between w-full mt-1 z-10">
+              <span className="text-[8px] font-mono text-muted">0:00</span>
+              <span className="text-[8px] font-mono text-muted">60:00</span>
             </div>
           </div>
 
@@ -507,11 +590,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
               <span className="text-accent font-mono text-xs border border-accent/30 px-1.5 py-0.5 rounded bg-accent/10">{members.length}</span>
             </div>
             <ul className="p-2 space-y-1 font-mono text-sm">
+              {members.length === 0 && (
+                <li className="text-muted text-xs text-center py-4">No nodes in range</li>
+              )}
               {members.map((member) => (
                 <li key={member.id}>
                   <div className={`flex items-center gap-2 p-2 rounded hover:bg-surface/80 transition-colors ${member.alias === userAlias ? 'bg-surface border border-muted' : 'text-text-main'}`}>
                     <div className={`w-2 h-2 rounded-full ${
-                      member.status === 'online' ? 'bg-primary animate-pulse shadow-neon-primary' : 
+                      member.status === 'online' ? 'bg-primary animate-pulse shadow-neon-primary' :
                       member.status === 'away' ? 'bg-yellow-500' : 'bg-danger'
                     }`}></div>
                     <span className={`${member.alias === userAlias ? 'text-white font-bold' : 'text-accent'} flex-1`}>{member.alias}</span>
@@ -524,7 +610,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
           <div className="p-4 border-t border-muted/50 bg-background-dark/50">
             <div className="text-[10px] text-muted font-mono mb-2 uppercase text-center">Current Alias</div>
-            <button 
+            <button
               onClick={onScramble}
               className="w-full py-2 border border-accent text-accent hover:bg-accent/10 transition-colors font-mono text-sm rounded flex items-center justify-center gap-2"
             >

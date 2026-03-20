@@ -4,10 +4,58 @@ import { Server } from 'socket.io';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
+import cors from 'cors';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// --- Constants ---
+const CENTER_LAT = 34.0522;
+const CENTER_LNG = -118.2437;
+const MAX_MESSAGE_LENGTH = 500;
+const MAX_ALIAS_LENGTH = 16;
+const MAX_TOPIC_LENGTH = 32;
+const MAX_MESSAGES_PER_ROOM = 200;
+const ALLOWED_EMOJIS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '💯', '⚡'];
+
+// --- Rate Limiting ---
+const rateLimits: Record<string, { count: number; resetAt: number }[]> = {};
+
+function isRateLimited(socketId: string, action: string, maxPerWindow: number, windowMs: number): boolean {
+  const key = `${socketId}:${action}`;
+  const now = Date.now();
+
+  if (!rateLimits[key]) rateLimits[key] = [];
+
+  // Remove expired entries
+  rateLimits[key] = rateLimits[key].filter(entry => entry.resetAt > now);
+
+  if (rateLimits[key].length >= maxPerWindow) return true;
+
+  rateLimits[key].push({ count: 1, resetAt: now + windowMs });
+  return false;
+}
+
+// --- Input Sanitization ---
+function sanitizeText(text: string): string {
+  return text
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .trim();
+}
+
+function isValidAlias(alias: unknown): alias is string {
+  return typeof alias === 'string' && alias.trim().length > 0 && alias.length <= MAX_ALIAS_LENGTH;
+}
+
+function isValidStatus(status: unknown): status is 'online' | 'away' | 'offline' {
+  return status === 'online' || status === 'away' || status === 'offline';
+}
+
+// --- Interfaces ---
 interface Reaction {
   emoji: string;
   count: number;
@@ -31,15 +79,13 @@ interface Room {
   frequency: string;
   population: number;
   maxPopulation: number;
-  ttl: number; // TTL in seconds
+  ttl: number;
   distance: number;
   bearing: string;
   status: 'active' | 'expiring';
   lat: number;
   lng: number;
 }
-
-
 
 interface UserStatus {
   id: string;
@@ -48,11 +94,7 @@ interface UserStatus {
   roomId: string | null;
 }
 
-import fs from 'fs';
-
-const CENTER_LAT = 34.0522;
-const CENTER_LNG = -118.2437;
-
+// --- Persistence ---
 const ROOMS_FILE = path.join(__dirname, 'data', 'rooms.json');
 const MESSAGES_FILE = path.join(__dirname, 'data', 'messages.json');
 
@@ -67,7 +109,7 @@ function loadData<T>(file: string, defaultValue: T): T {
   return defaultValue;
 }
 
-function saveData(file: string, data: any) {
+function saveData<T>(file: string, data: T): void {
   try {
     const dir = path.dirname(file);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -81,12 +123,9 @@ let rooms: Room[] = loadData(ROOMS_FILE, []);
 const messagesByRoom: Record<string, Message[]> = loadData(MESSAGES_FILE, {});
 const users: Record<string, UserStatus & { lat: number; lng: number }> = {};
 
-import cors from 'cors';
-
 async function startServer() {
   const app = express();
-  
-  // Robust CORS for all domains in production
+
   app.use(cors({
     origin: true,
     credentials: true,
@@ -107,13 +146,14 @@ async function startServer() {
     pingInterval: 25000
   });
 
-  // Health check endpoint for Railway proxy validation
-  app.get('/api/health', (req, res) => {
-    res.json({ 
+  app.get('/api/health', (_req, res) => {
+    res.json({
       status: 'matrix_active',
       node_env: process.env.NODE_ENV,
       port: process.env.PORT,
-      uptime: process.uptime()
+      uptime: process.uptime(),
+      rooms: rooms.length,
+      users: Object.keys(users).length
     });
   });
 
@@ -122,13 +162,26 @@ async function startServer() {
   // TTL Countdown logic
   setInterval(() => {
     let changed = false;
+    const prevLength = rooms.length;
+
     rooms = rooms.map(room => {
       const newTtl = Math.max(0, room.ttl - 1);
       const status: 'active' | 'expiring' = newTtl < 600 ? 'expiring' : 'active';
       if (room.ttl !== newTtl) changed = true;
       return { ...room, ttl: newTtl, status };
     }).filter(room => room.ttl > 0);
-    
+
+    // Clean up messages for expired rooms
+    if (rooms.length < prevLength) {
+      const activeRoomIds = new Set(rooms.map(r => r.id));
+      for (const roomId of Object.keys(messagesByRoom)) {
+        if (!activeRoomIds.has(roomId)) {
+          delete messagesByRoom[roomId];
+        }
+      }
+      saveData(MESSAGES_FILE, messagesByRoom);
+    }
+
     if (changed) {
       io.emit('rooms:update', rooms);
       saveData(ROOMS_FILE, rooms);
@@ -139,8 +192,7 @@ async function startServer() {
     console.log('User connected:', socket.id);
     let currentRoomId: string | null = null;
     let userAlias: string = 'ANON_' + socket.id.substring(0, 4).toUpperCase();
-    
-    // Assign a random position within 100m (roughly 0.0009 degrees)
+
     const lat = CENTER_LAT + (Math.random() - 0.5) * 0.0015;
     const lng = CENTER_LNG + (Math.random() - 0.5) * 0.0015;
 
@@ -161,16 +213,23 @@ async function startServer() {
       io.to(roomId).emit('room:members', members);
     };
 
-    socket.on('user:set-alias', (alias: string) => {
-      userAlias = alias;
+    socket.on('user:set-alias', (alias: unknown) => {
+      if (!isValidAlias(alias)) return;
+      if (isRateLimited(socket.id, 'alias', 5, 10000)) return;
+
+      const sanitized = sanitizeText(alias);
+      if (!sanitized) return;
+
+      userAlias = sanitized;
       if (users[socket.id]) {
-        users[socket.id].alias = alias;
+        users[socket.id].alias = sanitized;
         if (currentRoomId) updateRoomMembers(currentRoomId);
         io.emit('users:update', Object.values(users));
       }
     });
 
-    socket.on('user:set-status', (status: 'online' | 'away' | 'offline') => {
+    socket.on('user:set-status', (status: unknown) => {
+      if (!isValidStatus(status)) return;
       if (users[socket.id]) {
         users[socket.id].status = status;
         if (currentRoomId) updateRoomMembers(currentRoomId);
@@ -178,7 +237,17 @@ async function startServer() {
       }
     });
 
-    socket.on('room:join', (roomId: string) => {
+    socket.on('room:join', (roomId: unknown) => {
+      if (typeof roomId !== 'string' || !roomId) return;
+
+      const room = rooms.find(r => r.id === roomId);
+      if (!room) return;
+
+      if (room.population >= room.maxPopulation) {
+        socket.emit('room:error', { message: 'Room is at maximum capacity' });
+        return;
+      }
+
       if (currentRoomId) {
         socket.leave(currentRoomId);
         const prevRoom = rooms.find(r => r.id === currentRoomId);
@@ -191,19 +260,14 @@ async function startServer() {
       socket.join(roomId);
       currentRoomId = roomId;
       if (users[socket.id]) users[socket.id].roomId = roomId;
-      
-      const room = rooms.find(r => r.id === roomId);
-      if (room) {
-        room.population++;
-        io.emit('rooms:update', rooms);
-        saveData(ROOMS_FILE, rooms);
-      }
 
-      // Send existing messages
+      room.population++;
+      io.emit('rooms:update', rooms);
+      saveData(ROOMS_FILE, rooms);
+
       socket.emit('room:messages', messagesByRoom[roomId] || []);
       updateRoomMembers(roomId);
-      
-      // System message
+
       const systemMsg: Message = {
         id: 'sys_' + Date.now(),
         senderId: 'system',
@@ -212,47 +276,70 @@ async function startServer() {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
         type: 'system'
       };
-      
+
       if (!messagesByRoom[roomId]) messagesByRoom[roomId] = [];
       messagesByRoom[roomId].push(systemMsg);
       io.to(roomId).emit('message:new', systemMsg);
       saveData(MESSAGES_FILE, messagesByRoom);
     });
 
-    socket.on('message:send', ({ text, parentId }: { text: string, parentId?: string }) => {
-      console.log(`[MESSAGE_SEND] from ${userAlias} in room ${currentRoomId}: ${text}`);
-      if (!currentRoomId) {
-        console.log(`[MESSAGE_SEND_FAILED] No current room ID for socket ${socket.id}`);
+    socket.on('message:send', (payload: unknown) => {
+      if (!currentRoomId) return;
+      if (typeof payload !== 'object' || payload === null) return;
+
+      const { text, parentId } = payload as { text: unknown; parentId?: unknown };
+      if (typeof text !== 'string' || !text.trim()) return;
+      if (text.length > MAX_MESSAGE_LENGTH) return;
+      if (parentId !== undefined && typeof parentId !== 'string') return;
+
+      // Rate limit: 10 messages per 10 seconds
+      if (isRateLimited(socket.id, 'message', 10, 10000)) {
+        socket.emit('message:error', { message: 'Slow down! You are sending messages too quickly.' });
         return;
       }
 
+      const sanitizedText = sanitizeText(text);
+      if (!sanitizedText) return;
+
       const newMessage: Message = {
-        id: Date.now().toString(),
+        id: Date.now().toString() + '_' + Math.random().toString(36).substring(2, 6),
         senderId: socket.id,
         senderAlias: userAlias,
-        text,
+        text: sanitizedText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
         type: 'user',
-        parentId,
+        parentId: parentId as string | undefined,
         reactions: []
       };
 
       if (!messagesByRoom[currentRoomId]) messagesByRoom[currentRoomId] = [];
       messagesByRoom[currentRoomId].push(newMessage);
+
+      // Cap message history per room
+      if (messagesByRoom[currentRoomId].length > MAX_MESSAGES_PER_ROOM) {
+        messagesByRoom[currentRoomId] = messagesByRoom[currentRoomId].slice(-MAX_MESSAGES_PER_ROOM);
+      }
+
       io.to(currentRoomId).emit('message:new', newMessage);
       saveData(MESSAGES_FILE, messagesByRoom);
     });
 
-    socket.on('message:react', ({ messageId, emoji }: { messageId: string, emoji: string }) => {
+    socket.on('message:react', (payload: unknown) => {
       if (!currentRoomId) return;
+      if (typeof payload !== 'object' || payload === null) return;
+
+      const { messageId, emoji } = payload as { messageId: unknown; emoji: unknown };
+      if (typeof messageId !== 'string' || typeof emoji !== 'string') return;
+      if (!ALLOWED_EMOJIS.includes(emoji)) return;
+
+      if (isRateLimited(socket.id, 'react', 20, 10000)) return;
 
       const roomMessages = messagesByRoom[currentRoomId];
       if (!roomMessages) return;
 
-      const msgIndex = roomMessages.findIndex(m => m.id === messageId);
-      if (msgIndex === -1) return;
+      const msg = roomMessages.find(m => m.id === messageId);
+      if (!msg) return;
 
-      const msg = roomMessages[msgIndex];
       const reactions = msg.reactions || [];
       const existingReactionIndex = reactions.findIndex(r => r.emoji === emoji);
 
@@ -279,10 +366,22 @@ async function startServer() {
       saveData(MESSAGES_FILE, messagesByRoom);
     });
 
-    socket.on('room:deploy', (topic: string) => {
+    socket.on('room:deploy', (topic: unknown) => {
+      if (typeof topic !== 'string' || !topic.trim()) return;
+      if (topic.length > MAX_TOPIC_LENGTH) return;
+
+      // Rate limit: 3 rooms per 60 seconds
+      if (isRateLimited(socket.id, 'deploy', 3, 60000)) {
+        socket.emit('room:error', { message: 'You are deploying rooms too quickly. Wait a moment.' });
+        return;
+      }
+
+      const sanitizedTopic = sanitizeText(topic);
+      if (!sanitizedTopic) return;
+
       const newRoom: Room = {
-        id: Date.now().toString(),
-        topic,
+        id: Date.now().toString() + '_' + Math.random().toString(36).substring(2, 6),
+        topic: sanitizedTopic,
         frequency: (Math.random() * 20 + 90).toFixed(1),
         population: 0,
         maxPopulation: 32,
@@ -315,6 +414,14 @@ async function startServer() {
         delete users[socket.id];
         io.emit('users:update', Object.values(users));
       }
+
+      // Clean up rate limit entries for this socket
+      for (const key of Object.keys(rateLimits)) {
+        if (key.startsWith(socket.id + ':')) {
+          delete rateLimits[key];
+        }
+      }
+
       console.log('User disconnected:', socket.id);
     });
   });
@@ -328,7 +435,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

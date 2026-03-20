@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Radar, Fingerprint, Plus, Timer } from 'lucide-react';
+import { Radar, Fingerprint, Plus, Timer, WifiOff, Radio } from 'lucide-react';
 import { User, Room } from '../types';
 
 interface RadarViewProps {
@@ -10,11 +10,14 @@ interface RadarViewProps {
   onDeployClick: () => void;
   onIdentityClick: () => void;
   userAlias: string;
+  connectionStatus: 'connecting' | 'connected' | 'disconnected';
 }
 
 const CENTER_LAT = 34.0522;
 const CENTER_LNG = -118.2437;
-const COORDINATE_SCALE = 500000; // Adjust for fit in 800px container
+const COORDINATE_SCALE = 500000;
+
+type FilterType = 'all' | 'popular' | 'expiring';
 
 export const RadarView: React.FC<RadarViewProps> = ({
   rooms,
@@ -22,10 +25,23 @@ export const RadarView: React.FC<RadarViewProps> = ({
   onRoomSelect,
   onDeployClick,
   onIdentityClick,
-  userAlias
+  userAlias,
+  connectionStatus
 }) => {
   const [hoveredRoom, setHoveredRoom] = useState<Room | null>(null);
   const [hoveredUser, setHoveredUser] = useState<User | null>(null);
+  const [activeFilter, setActiveFilter] = useState<FilterType>('all');
+
+  const filteredRooms = useMemo(() => {
+    switch (activeFilter) {
+      case 'popular':
+        return rooms.filter(r => r.population >= 5);
+      case 'expiring':
+        return rooms.filter(r => r.status === 'expiring');
+      default:
+        return rooms;
+    }
+  }, [rooms, activeFilter]);
 
   const formatTtl = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -36,16 +52,22 @@ export const RadarView: React.FC<RadarViewProps> = ({
   const getPos = (lat: number, lng: number) => {
     const x = (lng - CENTER_LNG) * COORDINATE_SCALE;
     const y = (CENTER_LAT - lat) * COORDINATE_SCALE;
-    return { 
-      left: `calc(50% + ${x}px)`, 
-      top: `calc(50% + ${y}px)` 
+    return {
+      left: `calc(50% + ${x}px)`,
+      top: `calc(50% + ${y}px)`
     };
   };
+
+  const filters: { key: FilterType; label: string }[] = [
+    { key: 'all', label: 'All Frequencies' },
+    { key: 'popular', label: 'High Population' },
+    { key: 'expiring', label: 'Ending Soon' },
+  ];
 
   return (
     <div className="relative h-screen w-screen flex flex-col overflow-hidden">
       <header className="absolute top-0 left-0 w-full z-30 flex items-center justify-between p-6">
-        <div 
+        <div
           onClick={onIdentityClick}
           className="flex items-center gap-3 cursor-pointer group pointer-events-auto"
         >
@@ -64,12 +86,21 @@ export const RadarView: React.FC<RadarViewProps> = ({
             Neon Radar
           </h1>
           <div className="flex items-center gap-2 mt-1">
-            <div className="w-2 h-2 bg-primary rounded-full animate-pulse shadow-neon-primary"></div>
-            <span className="text-xs font-mono text-primary/80 uppercase tracking-widest">Scanning 100m Secure Zone</span>
+            {connectionStatus === 'connected' ? (
+              <>
+                <div className="w-2 h-2 bg-primary rounded-full animate-pulse shadow-neon-primary"></div>
+                <span className="text-xs font-mono text-primary/80 uppercase tracking-widest">Scanning 100m Secure Zone</span>
+              </>
+            ) : (
+              <>
+                <WifiOff size={14} className="text-danger" />
+                <span className="text-xs font-mono text-danger uppercase tracking-widest animate-pulse">Signal Lost</span>
+              </>
+            )}
           </div>
         </div>
 
-        <button 
+        <button
           onClick={onDeployClick}
           className="flex items-center justify-center h-12 px-6 bg-primary text-background-dark font-sans font-bold text-sm tracking-widest uppercase hover:bg-[#10d45e] hover:shadow-neon-primary transition-all border border-primary pointer-events-auto"
         >
@@ -93,15 +124,15 @@ export const RadarView: React.FC<RadarViewProps> = ({
             <span className="absolute top-2 left-1/2 -translate-x-1/2 bg-background-dark px-1 text-[10px] font-mono text-primary">25M</span>
           </div>
 
-          <motion.div 
-            animate={{ 
+          <motion.div
+            animate={{
               scale: [1, 1.15, 1],
               opacity: [1, 0.8, 1]
             }}
-            transition={{ 
-              duration: 2, 
-              repeat: Infinity, 
-              ease: "easeInOut" 
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              ease: "easeInOut"
             }}
             className="absolute w-4 h-4 bg-primary rounded-full shadow-neon-primary z-20"
           >
@@ -109,7 +140,7 @@ export const RadarView: React.FC<RadarViewProps> = ({
           </motion.div>
 
           <div className="absolute inset-0 rounded-full overflow-hidden z-10 pointer-events-none">
-            <motion.div 
+            <motion.div
               animate={{ rotate: 360 }}
               transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
               className="w-full h-full origin-center"
@@ -119,8 +150,23 @@ export const RadarView: React.FC<RadarViewProps> = ({
             />
           </div>
 
-          {rooms.map((room) => (
-            <div 
+          {/* Empty state */}
+          {filteredRooms.length === 0 && rooms.length === 0 && (
+            <div className="absolute z-30 flex flex-col items-center justify-center text-center pointer-events-none">
+              <Radio size={40} className="text-muted/40 mb-3" />
+              <p className="text-muted text-sm font-mono uppercase tracking-wider">No Active Frequencies</p>
+              <p className="text-muted/60 text-xs font-mono mt-1">Deploy a new frequency to begin</p>
+            </div>
+          )}
+
+          {filteredRooms.length === 0 && rooms.length > 0 && (
+            <div className="absolute z-30 flex flex-col items-center justify-center text-center pointer-events-none">
+              <p className="text-muted text-sm font-mono uppercase tracking-wider">No matches for filter</p>
+            </div>
+          )}
+
+          {filteredRooms.map((room) => (
+            <div
               key={room.id}
               className="absolute z-30 cursor-crosshair group -translate-x-1/2 -translate-y-1/2"
               style={getPos(room.lat, room.lng)}
@@ -131,7 +177,7 @@ export const RadarView: React.FC<RadarViewProps> = ({
               <div className={`w-4 h-4 rounded-full transition-all duration-200 ${
                 room.status === 'expiring' ? 'bg-danger shadow-neon-danger' : 'bg-accent shadow-neon-accent'
               } group-hover:scale-125 group-hover:bg-primary group-hover:shadow-neon-primary`} />
-              
+
               <AnimatePresence>
                 {hoveredRoom?.id === room.id && (
                   <motion.div
@@ -149,6 +195,9 @@ export const RadarView: React.FC<RadarViewProps> = ({
                       <Timer size={14} />
                       <span>{formatTtl(room.ttl)} LEFT</span>
                     </div>
+                    {room.population >= room.maxPopulation && (
+                      <div className="mt-2 text-[10px] font-mono text-danger uppercase">Room Full</div>
+                    )}
                     <div className={`absolute -bottom-[17px] left-1/2 -translate-x-1/2 w-[1px] h-4 ${room.status === 'expiring' ? 'bg-danger' : 'bg-accent'}`}></div>
                   </motion.div>
                 )}
@@ -157,7 +206,7 @@ export const RadarView: React.FC<RadarViewProps> = ({
           ))}
 
           {users.filter(u => u.alias !== userAlias).map((user) => (
-            <div 
+            <div
               key={user.id}
               className="absolute z-20 -translate-x-1/2 -translate-y-1/2 group"
               style={getPos(user.lat, user.lng)}
@@ -191,18 +240,18 @@ export const RadarView: React.FC<RadarViewProps> = ({
           <div className="bg-surface/80 border border-muted/30 p-4 backdrop-blur-sm">
             <h2 className="font-mono text-xs text-primary uppercase tracking-widest mb-3 border-b border-muted/30 pb-2">Active Filters</h2>
             <ul className="flex flex-col gap-2 font-mono text-xs text-text-main">
-              <li className="flex items-center justify-between cursor-pointer hover:text-primary transition-colors">
-                <span>All Frequencies</span>
-                <span className="w-2 h-2 bg-primary shadow-neon-primary"></span>
-              </li>
-              <li className="flex items-center justify-between cursor-pointer text-muted hover:text-primary transition-colors">
-                <span>High Population</span>
-                <span className="w-2 h-2 border border-muted"></span>
-              </li>
-              <li className="flex items-center justify-between cursor-pointer text-muted hover:text-primary transition-colors">
-                <span>Ending Soon</span>
-                <span className="w-2 h-2 border border-muted"></span>
-              </li>
+              {filters.map(f => (
+                <li
+                  key={f.key}
+                  onClick={() => setActiveFilter(f.key)}
+                  className={`flex items-center justify-between cursor-pointer transition-colors ${
+                    activeFilter === f.key ? 'text-primary' : 'text-muted hover:text-primary'
+                  }`}
+                >
+                  <span>{f.label}</span>
+                  <span className={`w-2 h-2 ${activeFilter === f.key ? 'bg-primary shadow-neon-primary' : 'border border-muted'}`}></span>
+                </li>
+              ))}
             </ul>
           </div>
           <div className="flex flex-col gap-1 font-mono text-[10px] text-muted opacity-50">
@@ -211,6 +260,7 @@ export const RadarView: React.FC<RadarViewProps> = ({
             <span>ALT: 71m</span>
             <span>RAD: 100m SECURE</span>
             <span className="text-primary mt-2">ACTIVE NODES: {users.length}</span>
+            <span className="text-accent">FREQUENCIES: {rooms.length}</span>
           </div>
         </div>
       </aside>
