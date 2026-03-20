@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Radio, Timer, ArrowRight } from 'lucide-react';
+import { X, Radio, ArrowRight } from 'lucide-react';
 
 interface DeployModalProps {
   isOpen: boolean;
@@ -14,6 +14,16 @@ export const DeployModal: React.FC<DeployModalProps> = ({
   onInitiate
 }) => {
   const [topic, setTopic] = useState('');
+
+  // Close on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
