@@ -4,14 +4,44 @@ import { RadarView } from './components/RadarView';
 import { ChatView } from './components/ChatView';
 import { DeployModal } from './components/DeployModal';
 import { IdentityDrawer } from './components/IdentityDrawer';
+import { BootScreen } from './components/BootScreen';
 import { Room, Message, User } from './types';
+
+let audioCtx: AudioContext | null = null;
+function playBlip() {
+  try {
+    if (!audioCtx) audioCtx = new AudioContext();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.1);
+  } catch {}
+}
+
+const CALLSIGN_PREFIXES = [
+  'GHOST', 'CIPHER', 'NEON', 'ZERO', 'VOLT', 'PROXY', 'DRIFT',
+  'ROGUE', 'PULSE', 'STATIC', 'FLUX', 'SHADOW', 'ECHO', 'OXIDE',
+  'PRISM', 'VECTOR', 'HELIX', 'SURGE', 'TRACE', 'GLITCH'
+];
+
+function generateCallsign(): string {
+  const prefix = CALLSIGN_PREFIXES[Math.floor(Math.random() * CALLSIGN_PREFIXES.length)];
+  const suffix = Math.random().toString(36).substring(2, 4).toUpperCase();
+  return `${prefix}_${suffix}`;
+}
 
 function getStoredAlias(): string {
   try {
     const stored = localStorage.getItem('neon-radar:alias');
     if (stored && stored.trim()) return stored;
   } catch {}
-  return 'USER_' + Math.random().toString(36).substring(2, 6).toUpperCase();
+  return generateCallsign();
 }
 
 export default function App() {
@@ -28,6 +58,9 @@ export default function App() {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [booted, setBooted] = useState(() => {
+    try { return sessionStorage.getItem('neon-radar:booted') === '1'; } catch { return false; }
+  });
 
   useEffect(() => {
     const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
@@ -72,6 +105,9 @@ export default function App() {
 
     socket.on('message:new', (message: Message) => {
       setMessages(prev => [...prev, message]);
+      if (message.type === 'user' && message.senderAlias !== userAlias) {
+        playBlip();
+      }
     });
 
     socket.on('message:update', (updatedMessage: Message) => {
@@ -170,8 +206,7 @@ export default function App() {
   }, []);
 
   const handleScrambleAlias = useCallback(() => {
-    const randomId = Math.random().toString(36).substring(2, 6).toUpperCase();
-    setUserAlias(`USER_${randomId}`);
+    setUserAlias(generateCallsign());
   }, []);
 
   const handleDeployInitiate = useCallback((topic: string) => {
@@ -180,8 +215,14 @@ export default function App() {
     }
   }, []);
 
+  const handleBootComplete = useCallback(() => {
+    setBooted(true);
+    try { sessionStorage.setItem('neon-radar:booted', '1'); } catch {}
+  }, []);
+
   return (
-    <div className="relative h-screen w-screen overflow-hidden">
+    <div className="relative h-screen w-screen overflow-hidden crt-flicker">
+      {!booted && <BootScreen onComplete={handleBootComplete} />}
       <div className="scanline" />
       <div className="vignette" />
 

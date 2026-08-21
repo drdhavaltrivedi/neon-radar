@@ -460,7 +460,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         <aside className="w-[300px] shrink-0 border-r border-muted bg-surface flex-col hidden md:flex">
           <div className="p-4 border-b border-muted/50">
             <h2 className="text-muted text-xs font-bold uppercase tracking-widest mb-1">Active Frequencies</h2>
-            <div className="text-[10px] font-mono text-primary animate-pulse uppercase">Scanning 100m radius...</div>
+            <div className="text-[10px] font-mono text-primary animate-pulse uppercase">Nearby frequencies</div>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {rooms.map((r) => (
@@ -502,8 +502,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
           <div className="flex-1 overflow-y-auto p-4 md:p-6 font-mono text-sm space-y-3 pb-24">
             <div className="flex flex-col items-center justify-center py-8 opacity-70 border-b border-dashed border-muted/30 mb-6">
               <Radio size={32} className="text-primary mb-2" />
-              <p className="text-primary text-center uppercase tracking-widest text-xs">Room Deployed. Waiting for local connections.</p>
-              <p className="text-muted text-[10px] mt-1">Encrypted transmission channel established.</p>
+              <p className="text-primary text-center uppercase tracking-widest text-xs">Frequency {room.frequency} MHz locked</p>
+              <p className="text-muted text-[10px] mt-1">You're in. Say something.</p>
             </div>
 
             {messages.filter(m => !m.parentId).map((msg) => (

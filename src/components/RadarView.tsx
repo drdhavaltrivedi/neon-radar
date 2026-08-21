@@ -117,7 +117,7 @@ export const RadarView: React.FC<RadarViewProps> = ({
         </div>
 
         <div className="absolute left-1/2 -translate-x-1/2 top-3 md:top-6 flex flex-col items-center">
-          <h1 className="text-lg md:text-2xl font-bold text-primary tracking-widest uppercase flex items-center gap-2">
+          <h1 className="text-lg md:text-2xl font-bold text-primary tracking-widest uppercase flex items-center gap-2 glitch-text">
             <Radar size={20} className="md:w-6 md:h-6" />
             <span className="hidden sm:inline">Neon Radar</span>
             <span className="sm:hidden">NR</span>
@@ -196,8 +196,8 @@ export const RadarView: React.FC<RadarViewProps> = ({
           {filteredRooms.length === 0 && rooms.length === 0 && (
             <div className="absolute z-30 flex flex-col items-center justify-center text-center pointer-events-none">
               <Radio size={40} className="text-muted/40 mb-3" />
-              <p className="text-muted text-sm font-mono uppercase tracking-wider">No Active Frequencies</p>
-              <p className="text-muted/60 text-xs font-mono mt-1">Deploy a new frequency to begin</p>
+              <p className="text-muted text-sm font-mono uppercase tracking-wider">Nothing on the radar</p>
+              <p className="text-muted/60 text-xs font-mono mt-1">Hit Deploy to start a frequency</p>
             </div>
           )}
 
