@@ -17,6 +17,8 @@ interface ChatViewProps {
   onRoomSelect: (room: Room) => void;
   onDeployClick: () => void;
   connectionStatus: 'connecting' | 'connected' | 'disconnected';
+  typingUsers: string[];
+  onTyping: (isTyping: boolean) => void;
 }
 
 const COMMON_EMOJIS = ['👍', '❤️', '🔥', '😂', '😮', '😢', '💯', '⚡'];
@@ -184,7 +186,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onScramble,
   onRoomSelect,
   onDeployClick,
-  connectionStatus
+  connectionStatus,
+  typingUsers,
+  onTyping
 }) => {
   const [inputText, setInputText] = useState('');
   const [activeReactionPicker, setActiveReactionPicker] = useState<string | null>(null);
@@ -193,6 +197,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(getStoredSettings);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -240,7 +245,25 @@ export const ChatView: React.FC<ChatViewProps> = ({
       onSendMessage(trimmed, replyingTo?.id);
       setInputText('');
       setReplyingTo(null);
+      onTyping(false);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       inputRef.current?.focus();
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (value.length <= MAX_MESSAGE_LENGTH) {
+      setInputText(value);
+    }
+
+    if (value.trim()) {
+      onTyping(true);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => onTyping(false), 2000);
+    } else {
+      onTyping(false);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     }
   };
 
@@ -503,6 +526,23 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
           <div className="absolute bottom-0 left-0 right-0 bg-background-dark/95 backdrop-blur border-t border-muted p-4 z-20">
             <AnimatePresence>
+              {typingUsers.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="max-w-4xl mx-auto mb-2"
+                >
+                  <span className="text-primary/70 text-xs font-mono animate-pulse">
+                    {typingUsers.length === 1
+                      ? `${typingUsers[0]} is transmitting...`
+                      : `${typingUsers.slice(0, 2).join(', ')}${typingUsers.length > 2 ? ` +${typingUsers.length - 2}` : ''} are transmitting...`
+                    }
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <AnimatePresence>
               {replyingTo && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
@@ -531,11 +571,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 <input
                   ref={inputRef}
                   value={inputText}
-                  onChange={(e) => {
-                    if (e.target.value.length <= MAX_MESSAGE_LENGTH) {
-                      setInputText(e.target.value);
-                    }
-                  }}
+                  onChange={handleInputChange}
                   disabled={connectionStatus === 'disconnected'}
                   className="w-full bg-surface border border-muted text-white font-mono text-sm rounded focus:ring-1 focus:ring-primary focus:border-primary block pl-8 p-3 transition-colors placeholder:text-muted/70 disabled:opacity-50 disabled:cursor-not-allowed"
                   placeholder={connectionStatus === 'disconnected' ? 'RECONNECTING...' : 'TRANSMIT MESSAGE...'}

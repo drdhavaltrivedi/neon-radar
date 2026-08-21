@@ -38,13 +38,10 @@ function isRateLimited(socketId: string, action: string, maxPerWindow: number, w
 }
 
 // --- Input Sanitization ---
+// React escapes text content on render, so we only need to trim and
+// enforce length limits — no HTML-entity encoding needed.
 function sanitizeText(text: string): string {
-  return text
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .trim();
+  return text.trim();
 }
 
 function isValidAlias(alias: unknown): alias is string {
@@ -120,8 +117,12 @@ function saveData<T>(file: string, data: T): void {
 }
 
 let rooms: Room[] = loadData(ROOMS_FILE, []);
+// Reset populations on startup — persisted counts are stale since all
+// socket connections were lost when the process restarted.
+rooms = rooms.map(r => ({ ...r, population: 0 }));
 const messagesByRoom: Record<string, Message[]> = loadData(MESSAGES_FILE, {});
 const users: Record<string, UserStatus & { lat: number; lng: number }> = {};
+const typingUsers: Record<string, Set<string>> = {};
 
 async function startServer() {
   const app = express();
@@ -269,7 +270,7 @@ async function startServer() {
       updateRoomMembers(roomId);
 
       const systemMsg: Message = {
-        id: 'sys_' + Date.now(),
+        id: 'sys_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
         senderId: 'system',
         senderAlias: 'SYSTEM',
         text: `${userAlias} entered the radius.`,
@@ -281,6 +282,52 @@ async function startServer() {
       messagesByRoom[roomId].push(systemMsg);
       io.to(roomId).emit('message:new', systemMsg);
       saveData(MESSAGES_FILE, messagesByRoom);
+    });
+
+    socket.on('room:leave', () => {
+      if (!currentRoomId) return;
+
+      socket.leave(currentRoomId);
+      const room = rooms.find(r => r.id === currentRoomId);
+      if (room) room.population = Math.max(0, room.population - 1);
+
+      const leaveMsg: Message = {
+        id: 'sys_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        senderId: 'system',
+        senderAlias: 'SYSTEM',
+        text: `${userAlias} left the frequency.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+        type: 'system'
+      };
+
+      if (messagesByRoom[currentRoomId]) {
+        messagesByRoom[currentRoomId].push(leaveMsg);
+        io.to(currentRoomId).emit('message:new', leaveMsg);
+        saveData(MESSAGES_FILE, messagesByRoom);
+      }
+
+      const oldRoomId = currentRoomId;
+      currentRoomId = null;
+      if (users[socket.id]) users[socket.id].roomId = null;
+      updateRoomMembers(oldRoomId);
+      io.emit('rooms:update', rooms);
+      saveData(ROOMS_FILE, rooms);
+    });
+
+    socket.on('user:typing', (isTyping: unknown) => {
+      if (!currentRoomId || typeof isTyping !== 'boolean') return;
+      if (!typingUsers[currentRoomId]) typingUsers[currentRoomId] = new Set();
+
+      if (isTyping) {
+        typingUsers[currentRoomId].add(userAlias);
+      } else {
+        typingUsers[currentRoomId].delete(userAlias);
+      }
+
+      socket.to(currentRoomId).emit('room:typing', {
+        roomId: currentRoomId,
+        users: Array.from(typingUsers[currentRoomId])
+      });
     });
 
     socket.on('message:send', (payload: unknown) => {
@@ -322,6 +369,14 @@ async function startServer() {
 
       io.to(currentRoomId).emit('message:new', newMessage);
       saveData(MESSAGES_FILE, messagesByRoom);
+
+      if (typingUsers[currentRoomId]) {
+        typingUsers[currentRoomId].delete(userAlias);
+        socket.to(currentRoomId).emit('room:typing', {
+          roomId: currentRoomId,
+          users: Array.from(typingUsers[currentRoomId])
+        });
+      }
     });
 
     socket.on('message:react', (payload: unknown) => {
@@ -405,6 +460,13 @@ async function startServer() {
         if (room) {
           room.population = Math.max(0, room.population - 1);
           io.emit('rooms:update', rooms);
+        }
+        if (typingUsers[currentRoomId]) {
+          typingUsers[currentRoomId].delete(userAlias);
+          io.to(currentRoomId).emit('room:typing', {
+            roomId: currentRoomId,
+            users: Array.from(typingUsers[currentRoomId])
+          });
         }
         const oldRoomId = currentRoomId;
         delete users[socket.id];

@@ -27,6 +27,7 @@ export default function App() {
   const [userAlias, setUserAlias] = useState(getStoredAlias);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
 
   useEffect(() => {
     const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
@@ -92,6 +93,10 @@ export default function App() {
       setTimeout(() => setErrorMessage(null), 3000);
     });
 
+    socket.on('room:typing', (data: { roomId: string; users: string[] }) => {
+      setTypingUsers(data.users);
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -131,8 +136,12 @@ export default function App() {
   }, []);
 
   const handleBackToRadar = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.emit('room:leave');
+    }
     setView('radar');
     setActiveRoom(null);
+    setMessages([]);
     setCurrentRoomMembers([]);
   }, []);
 
@@ -151,6 +160,12 @@ export default function App() {
   const handleReactToMessage = useCallback((messageId: string, emoji: string) => {
     if (socketRef.current) {
       socketRef.current.emit('message:react', { messageId, emoji });
+    }
+  }, []);
+
+  const handleTyping = useCallback((isTyping: boolean) => {
+    if (socketRef.current) {
+      socketRef.current.emit('user:typing', isTyping);
     }
   }, []);
 
@@ -210,6 +225,8 @@ export default function App() {
             onRoomSelect={handleRoomSelect}
             onDeployClick={() => setIsDeployModalOpen(true)}
             connectionStatus={connectionStatus}
+            typingUsers={typingUsers}
+            onTyping={handleTyping}
           />
         )
       )}
