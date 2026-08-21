@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Radio, Timer, ArrowRight } from 'lucide-react';
+import { X, Radio, ArrowRight } from 'lucide-react';
 
 interface DeployModalProps {
   isOpen: boolean;
@@ -14,6 +14,16 @@ export const DeployModal: React.FC<DeployModalProps> = ({
   onInitiate
 }) => {
   const [topic, setTopic] = useState('');
+
+  // Close on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +63,7 @@ export const DeployModal: React.FC<DeployModalProps> = ({
             <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-6">
               <div className="flex flex-col gap-2">
                 <label className="text-xs font-mono text-muted uppercase tracking-wider" htmlFor="topic-input">
-                  Designation Protocol
+                  What's this frequency about?
                 </label>
                 <div className="relative group">
                   <input
@@ -81,7 +91,7 @@ export const DeployModal: React.FC<DeployModalProps> = ({
 
               <div className="bg-primary/5 border border-primary/20 p-3 flex items-start gap-3">
                 <p className="text-xs font-mono text-text-main/80 leading-relaxed">
-                  Frequency will auto-destruct in <span className="text-primary font-bold">59:59</span>. Transmissions are entirely ephemeral.
+                  This frequency self-destructs in <span className="text-primary font-bold">60 minutes</span>. Everything in it disappears when the timer runs out.
                 </p>
               </div>
 

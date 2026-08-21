@@ -1,10 +1,48 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { RadarView } from './components/RadarView';
 import { ChatView } from './components/ChatView';
 import { DeployModal } from './components/DeployModal';
 import { IdentityDrawer } from './components/IdentityDrawer';
+import { BootScreen } from './components/BootScreen';
 import { Room, Message, User } from './types';
+
+let audioCtx: AudioContext | null = null;
+function playBlip() {
+  try {
+    if (!audioCtx) audioCtx = new AudioContext();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.1);
+  } catch {}
+}
+
+const CALLSIGN_PREFIXES = [
+  'GHOST', 'CIPHER', 'NEON', 'ZERO', 'VOLT', 'PROXY', 'DRIFT',
+  'ROGUE', 'PULSE', 'STATIC', 'FLUX', 'SHADOW', 'ECHO', 'OXIDE',
+  'PRISM', 'VECTOR', 'HELIX', 'SURGE', 'TRACE', 'GLITCH'
+];
+
+function generateCallsign(): string {
+  const prefix = CALLSIGN_PREFIXES[Math.floor(Math.random() * CALLSIGN_PREFIXES.length)];
+  const suffix = Math.random().toString(36).substring(2, 4).toUpperCase();
+  return `${prefix}_${suffix}`;
+}
+
+function getStoredAlias(): string {
+  try {
+    const stored = localStorage.getItem('neon-radar:alias');
+    if (stored && stored.trim()) return stored;
+  } catch {}
+  return generateCallsign();
+}
 
 export default function App() {
   const socketRef = useRef<Socket | null>(null);
@@ -16,12 +54,38 @@ export default function App() {
   const [currentRoomMembers, setCurrentRoomMembers] = useState<User[]>([]);
   const [isDeployModalOpen, setIsDeployModalOpen] = useState(false);
   const [isIdentityDrawerOpen, setIsIdentityDrawerOpen] = useState(false);
-  const [userAlias, setUserAlias] = useState('USER_' + Math.random().toString(36).substring(2, 6).toUpperCase());
+  const [userAlias, setUserAlias] = useState(getStoredAlias);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [booted, setBooted] = useState(() => {
+    try { return sessionStorage.getItem('neon-radar:booted') === '1'; } catch { return false; }
+  });
 
   useEffect(() => {
     const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
-    socketRef.current = io(SOCKET_URL);
+    socketRef.current = io(SOCKET_URL, {
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    });
     const socket = socketRef.current;
+
+    socket.on('connect', () => {
+      setConnectionStatus('connected');
+      setErrorMessage(null);
+      // Re-send alias on reconnect
+      socket.emit('user:set-alias', userAlias);
+    });
+
+    socket.on('disconnect', () => {
+      setConnectionStatus('disconnected');
+    });
+
+    socket.on('connect_error', () => {
+      setConnectionStatus('disconnected');
+    });
 
     socket.on('rooms:update', (updatedRooms: Room[]) => {
       setRooms(updatedRooms);
@@ -41,6 +105,9 @@ export default function App() {
 
     socket.on('message:new', (message: Message) => {
       setMessages(prev => [...prev, message]);
+      if (message.type === 'user' && message.senderAlias !== userAlias) {
+        playBlip();
+      }
     });
 
     socket.on('message:update', (updatedMessage: Message) => {
@@ -52,6 +119,20 @@ export default function App() {
       setIsDeployModalOpen(false);
     });
 
+    socket.on('message:error', (data: { message: string }) => {
+      setErrorMessage(data.message);
+      setTimeout(() => setErrorMessage(null), 3000);
+    });
+
+    socket.on('room:error', (data: { message: string }) => {
+      setErrorMessage(data.message);
+      setTimeout(() => setErrorMessage(null), 3000);
+    });
+
+    socket.on('room:typing', (data: { roomId: string; users: string[] }) => {
+      setTypingUsers(data.users);
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -61,78 +142,117 @@ export default function App() {
   useEffect(() => {
     if (activeRoom) {
       const updatedActive = rooms.find(r => r.id === activeRoom.id);
-      if (updatedActive && JSON.stringify(updatedActive) !== JSON.stringify(activeRoom)) {
+      if (updatedActive) {
         setActiveRoom(updatedActive);
+      } else {
+        // Room expired — go back to radar
+        setView('radar');
+        setActiveRoom(null);
+        setCurrentRoomMembers([]);
       }
     }
-  }, [rooms, activeRoom]);
+  }, [rooms]);
 
+  // Persist alias to localStorage
   useEffect(() => {
+    try {
+      localStorage.setItem('neon-radar:alias', userAlias);
+    } catch {}
     if (socketRef.current) {
       socketRef.current.emit('user:set-alias', userAlias);
     }
   }, [userAlias]);
 
-  const handleRoomSelect = (room: Room) => {
+  const handleRoomSelect = useCallback((room: Room) => {
     setActiveRoom(room);
     setView('chat');
     if (socketRef.current) {
       socketRef.current.emit('room:join', room.id);
     }
-  };
+  }, []);
 
-  const handleBackToRadar = () => {
+  const handleBackToRadar = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.emit('room:leave');
+    }
     setView('radar');
     setActiveRoom(null);
-    setCurrentRoomMembers([]); // Reset members when leaving
-  };
+    setMessages([]);
+    setCurrentRoomMembers([]);
+  }, []);
 
-  const handleSendMessage = (text: string, parentId?: string) => {
+  const handleSendMessage = useCallback((text: string, parentId?: string) => {
     if (socketRef.current) {
       socketRef.current.emit('message:send', { text, parentId });
     }
-  };
+  }, []);
 
-  const handleSetStatus = (status: 'online' | 'away' | 'offline') => {
+  const handleSetStatus = useCallback((status: 'online' | 'away' | 'offline') => {
     if (socketRef.current) {
       socketRef.current.emit('user:set-status', status);
     }
-  };
+  }, []);
 
-  const handleReactToMessage = (messageId: string, emoji: string) => {
+  const handleReactToMessage = useCallback((messageId: string, emoji: string) => {
     if (socketRef.current) {
       socketRef.current.emit('message:react', { messageId, emoji });
     }
-  };
+  }, []);
 
-  const handleScrambleAlias = () => {
-    const randomId = Math.random().toString(36).substring(2, 6).toUpperCase();
-    setUserAlias(`USER_${randomId}`);
-  };
+  const handleTyping = useCallback((isTyping: boolean) => {
+    if (socketRef.current) {
+      socketRef.current.emit('user:typing', isTyping);
+    }
+  }, []);
 
-  const handleDeployInitiate = (topic: string) => {
+  const handleScrambleAlias = useCallback(() => {
+    setUserAlias(generateCallsign());
+  }, []);
+
+  const handleDeployInitiate = useCallback((topic: string) => {
     if (socketRef.current) {
       socketRef.current.emit('room:deploy', topic);
     }
-  };
+  }, []);
+
+  const handleBootComplete = useCallback(() => {
+    setBooted(true);
+    try { sessionStorage.setItem('neon-radar:booted', '1'); } catch {}
+  }, []);
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden">
+    <div className="relative h-screen w-screen overflow-hidden crt-flicker">
+      {!booted && <BootScreen onComplete={handleBootComplete} />}
       <div className="scanline" />
       <div className="vignette" />
-      
+
+      {/* Connection Status Banner */}
+      {connectionStatus === 'disconnected' && (
+        <div className="fixed top-0 left-0 right-0 z-[100] bg-danger/90 text-white text-center py-2 text-sm font-mono uppercase tracking-wider animate-pulse">
+          Signal Lost — Attempting Reconnection...
+        </div>
+      )}
+
+      {/* Error Toast */}
+      {errorMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-danger/90 border border-danger text-white px-6 py-3 rounded font-mono text-sm shadow-neon-danger">
+          {errorMessage}
+        </div>
+      )}
+
       {view === 'radar' ? (
-        <RadarView 
+        <RadarView
           rooms={rooms}
           users={members}
           onRoomSelect={handleRoomSelect}
           onDeployClick={() => setIsDeployModalOpen(true)}
           onIdentityClick={() => setIsIdentityDrawerOpen(true)}
           userAlias={userAlias}
+          connectionStatus={connectionStatus}
         />
       ) : (
         activeRoom && (
-          <ChatView 
+          <ChatView
             room={activeRoom}
             rooms={rooms}
             messages={messages}
@@ -145,17 +265,20 @@ export default function App() {
             onScramble={handleScrambleAlias}
             onRoomSelect={handleRoomSelect}
             onDeployClick={() => setIsDeployModalOpen(true)}
+            connectionStatus={connectionStatus}
+            typingUsers={typingUsers}
+            onTyping={handleTyping}
           />
         )
       )}
 
-      <DeployModal 
+      <DeployModal
         isOpen={isDeployModalOpen}
         onClose={() => setIsDeployModalOpen(false)}
         onInitiate={handleDeployInitiate}
       />
 
-      <IdentityDrawer 
+      <IdentityDrawer
         isOpen={isIdentityDrawerOpen}
         onClose={() => setIsIdentityDrawerOpen(false)}
         alias={userAlias}

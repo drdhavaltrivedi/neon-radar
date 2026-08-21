@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, RefreshCw, Zap, MapPin, Activity } from 'lucide-react';
+import { X, RefreshCw, Zap } from 'lucide-react';
 
 interface IdentityDrawerProps {
   isOpen: boolean;
@@ -19,6 +19,16 @@ export const IdentityDrawer: React.FC<IdentityDrawerProps> = ({
   onAliasChange,
   activeUsers
 }) => {
+  // Close on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -74,7 +84,7 @@ export const IdentityDrawer: React.FC<IdentityDrawerProps> = ({
                   <RefreshCw size={18} />
                   [Scramble Identity]
                 </button>
-                <p className="text-muted text-[10px] text-center mt-2 font-mono uppercase">Change your public designation in the neon matrix.</p>
+                <p className="text-muted text-[10px] text-center mt-2 font-mono uppercase">Roll a new callsign</p>
               </div>
 
               <hr className="border-muted/30 mb-8" />
@@ -107,7 +117,7 @@ export const IdentityDrawer: React.FC<IdentityDrawerProps> = ({
               </div>
 
               <div className="mt-auto pt-8 text-center text-muted font-mono text-[8px] uppercase tracking-widest opacity-30">
-                Connection established via ephemeral tunnel protocol. Message history securely logged for this device.
+                Nothing here is permanent.
               </div>
             </div>
           </motion.div>

@@ -1,64 +1,36 @@
-# 🛰️ Neon Radar
+# Neon Radar
 
-A futuristic, real-time proximity-based chat application set in a neon-drenched secure zone. **Neon Radar** allows you to discover local "frequency" rooms, connect with other nearby nodes, and engage in ephemeral, secure transmissions.
+Proximity-based ephemeral chat. Think walkie-talkies, but in a browser, with a cyberpunk radar UI.
 
-![Neon Radar Interface](/public/og-image.png)
+You open the app, a radar scans a 100m zone around you, and you see "frequency" rooms nearby. Tap one to join. Chat disappears when the room's TTL hits zero. No accounts, no history, no trace.
 
-### 🌍 Live Deployment
-- **Frontend (Vercel)**: [https://neon-radar.vercel.app/](https://neon-radar.vercel.app/)
-- **Backend (Railway)**: [https://neon-radar-production.up.railway.app/](https://neon-radar-production.up.railway.app/)
-## 📡 Live Radar Tracking
+![Neon Radar](/public/og-image.png)
 
-The core of the experience is the **Proximity Radar**, which scans a 100m secure zone around your location.
-- **Dynamic Frequency Nodes**: Rooms are deployed on specific frequencies (e.g., 104.5 MHz) and appear on your radar based on their real or simulated GPS coordinates.
-- **Node Discovery**: Other connected users appear as pings on the radar. You can hover over them to see their current public designation (Alias).
-- **Secure Tunneling**: Each connection is established via an ephemeral tunnel protocol.
+**Live at** [neon-radar.vercel.app](https://neon-radar.vercel.app/)
 
-## 💬 Features
+## How it works
 
-- **Alias Management**: Scramble or manually set your identity in the Matrix. Your public designation is strictly ephemeral.
-- **Local Transmissions**: Join frequencies to chat with anyone in that radius. No registration required.
-- **Real-Time Presence**: See "Local Nodes" in your frequency and monitor their status (Online, Away, Offline).
-- **Message Interaction**: React to messages with emojis and reply to specific transmission lines.
-- **Ephemeral Rooms**: Each room has a TTL (Time-To-Live). Once the countdown hits zero, the frequency is decommissioned.
-- **Persistence**: While transmissions are designed for the moment, the system now tracks room states and message history across reboots for a consistent experience.
+- Rooms are deployed on random radio frequencies and placed on a radar grid
+- Each room has a 60-minute countdown. When it expires, the room and its messages are gone
+- You get a random callsign (GHOST_7X, CIPHER_3R, etc.) that you can change or scramble
+- Real-time messaging with replies, reactions, and typing indicators
+- Presence tracking shows who's online, away, or offline in your frequency
 
-## 🚀 Technology Stack
+## Running it
 
-- **Frontend**: React 19 + Vite
-- **Styling**: Tailwind CSS + Vanilla CSS (Neon Aesthetics)
-- **Animations**: Motion (Framer Motion)
-- **Real-time Engine**: Socket.io (Bi-directional WebSocket communication)
-- **Icons**: Lucide React
-- **Backend**: Node.js + Express + TSX
+```
+npm install
+npm run dev
+```
 
-## 🛠️ Getting Started
+Opens on `localhost:3000`. The dev server runs both the Vite frontend and the Express/Socket.io backend together.
 
-### Prerequisites
-- Node.js (v18 or higher)
-- npm or yarn
+## Stack
 
-### Installation
-1. Clone the repository:
-   ```bash
-   git clone [repository-url]
-   cd neon-radar
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the transmission server:
-   ```bash
-   npm run dev
-   ```
+React 19, Vite, Tailwind v4, Socket.io, Motion, Express. No database -- rooms and messages persist to flat JSON files under `data/` and reset on restart.
 
-## 🔐 Privacy & Security
+## Deployment
 
-Neon Radar is built on the philosophy of ephemeral identities.
-- **Non-Persistent Data**: Most metadata is wiped upon system reset.
-- **Secure Radius**: Communications are localized to ensure only those in the immediate "radius" can access the frequency.
+Frontend deploys to Vercel (static build). Backend deploys to Railway (Dockerfile). Set `VITE_API_URL` in Vercel to point at the Railway URL for cross-origin socket connections.
 
----
-
-*Scan the matrix. Find your frequency.* 🌌
+See `.env.example` for config options.
